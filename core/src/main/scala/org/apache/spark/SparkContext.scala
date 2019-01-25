@@ -53,6 +53,7 @@ import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend, StandaloneSchedulerBackend}
 import org.apache.spark.scheduler.local.LocalSchedulerBackend
+import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.status.AppStatusStore
 import org.apache.spark.status.api.v1.ThreadStackTrace
 import org.apache.spark.storage._
@@ -697,6 +698,9 @@ class SparkContext(config: SparkConf) extends Logging {
    * @note Return statements are NOT allowed in the given body.
    */
   private[spark] def withScope[U](body: => U): U = RDDOperationScope.withScope[U](this)(body)
+
+  // def sparkSession: org.apache.spark.sql.SparkSession =
+  //   org.apache.spark.sql.SparkSession.builder.sparkContext(this).getOrCreate
 
   // Methods for creating RDDs
 

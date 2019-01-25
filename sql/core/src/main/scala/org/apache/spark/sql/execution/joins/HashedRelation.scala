@@ -144,8 +144,8 @@ private[joins] class UnsafeHashedRelation(
     val unsafeKey = key.asInstanceOf[UnsafeRow]
     val map = binaryMap  // avoid the compiler error
     val loc = new map.Location  // this could be allocated in stack
-    binaryMap.safeLookup(unsafeKey.getBaseObject, unsafeKey.getBaseOffset,
-      unsafeKey.getSizeInBytes, loc, unsafeKey.hashCode())
+    // binaryMap.safeLookup(unsafeKey.getBaseObject, unsafeKey.getBaseOffset,
+    //   unsafeKey.getSizeInBytes, loc, unsafeKey.hashCode())
     if (loc.isDefined) {
       new Iterator[UnsafeRow] {
         private var _hasNext = true
@@ -165,8 +165,8 @@ private[joins] class UnsafeHashedRelation(
     val unsafeKey = key.asInstanceOf[UnsafeRow]
     val map = binaryMap  // avoid the compiler error
     val loc = new map.Location  // this could be allocated in stack
-    binaryMap.safeLookup(unsafeKey.getBaseObject, unsafeKey.getBaseOffset,
-      unsafeKey.getSizeInBytes, loc, unsafeKey.hashCode())
+    // binaryMap.safeLookup(unsafeKey.getBaseObject, unsafeKey.getBaseOffset,
+    //   unsafeKey.getSizeInBytes, loc, unsafeKey.hashCode())
     if (loc.isDefined) {
       resultRow.pointTo(loc.getValueBase, loc.getValueOffset, loc.getValueLength)
       resultRow

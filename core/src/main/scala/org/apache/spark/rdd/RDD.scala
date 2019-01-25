@@ -1015,6 +1015,7 @@ abstract class RDD[T: ClassTag](
    * associative binary operator.
    */
   def reduce(f: (T, T) => T): T = withScope {
+    // logWarning("reducing")
     val cleanF = sc.clean(f)
     val reducePartition: Iterator[T] => Option[T] = iter => {
       if (iter.hasNext) {
@@ -1698,6 +1699,20 @@ abstract class RDD[T: ClassTag](
   @transient private[spark] val scope: Option[RDDOperationScope] = {
     Option(sc.getLocalProperty(SparkContext.RDD_SCOPE_KEY)).map(RDDOperationScope.fromJson)
   }
+
+  def getTopScopeName: String =
+    scope.map(_.getAllScopes).map(_.head).map(_.name).getOrElse("undefined")
+
+  def debugOperationChain() {
+
+  }
+
+  // var dataset: Dataset[T] = null
+  //
+  // def attachDataset(ds: Dataset[T]): RDD[T] = {
+  //   dataset = ds
+  //   this
+  // }
 
   private[spark] def getCreationSite: String = Option(creationSite).map(_.shortForm).getOrElse("")
 
