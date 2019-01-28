@@ -1707,13 +1707,6 @@ abstract class RDD[T: ClassTag](
 
   }
 
-  // var dataset: Dataset[T] = null
-  //
-  // def attachDataset(ds: Dataset[T]): RDD[T] = {
-  //   dataset = ds
-  //   this
-  // }
-
   private[spark] def getCreationSite: String = Option(creationSite).map(_.shortForm).getOrElse("")
 
   private[spark] def elementClassTag: ClassTag[T] = classTag[T]
