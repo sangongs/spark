@@ -44,7 +44,7 @@ private[spark] object PythonUtils {
   }
 
   def generateRDDWithNull(sc: JavaSparkContext): JavaRDD[String] = {
-    sc.parallelize(List("a", null, "b"))
+    sc._parallelize(List("a", null, "b"))
   }
 
   /**

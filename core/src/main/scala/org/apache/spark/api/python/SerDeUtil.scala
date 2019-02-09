@@ -274,7 +274,7 @@ private[spark] object SerDeUtil extends Logging {
       case Array(other) => throw new SparkException(
         s"RDD element of type ${other.getClass.getName} cannot be used")
     }
-    rdd.map { obj =>
+    rdd._map { obj =>
       val arr = obj.asInstanceOf[Array[_]]
       (arr.head.asInstanceOf[K], arr.last.asInstanceOf[V])
     }

@@ -37,14 +37,14 @@ class JavaRDD[T](val rdd: RDD[T])(implicit val classTag: ClassTag[T])
   /**
    * Persist this RDD with the default storage level (`MEMORY_ONLY`).
    */
-  def cache(): JavaRDD[T] = wrapRDD(rdd.cache())
+  def cache(): JavaRDD[T] = wrapRDD(rdd._cache())
 
   /**
    * Set this RDD's storage level to persist its values across operations after the first time
    * it is computed. This can only be used to assign a new storage level if the RDD does not
    * have a storage level set yet..
    */
-  def persist(newLevel: StorageLevel): JavaRDD[T] = wrapRDD(rdd.persist(newLevel))
+  def persist(newLevel: StorageLevel): JavaRDD[T] = wrapRDD(rdd._persist(newLevel))
 
   /**
    * Mark the RDD as non-persistent, and remove all blocks for it from memory and disk.
@@ -64,18 +64,18 @@ class JavaRDD[T](val rdd: RDD[T])(implicit val classTag: ClassTag[T])
   /**
    * Return a new RDD containing the distinct elements in this RDD.
    */
-  def distinct(): JavaRDD[T] = wrapRDD(rdd.distinct())
+  def distinct(): JavaRDD[T] = wrapRDD(rdd._distinct())
 
   /**
    * Return a new RDD containing the distinct elements in this RDD.
    */
-  def distinct(numPartitions: Int): JavaRDD[T] = wrapRDD(rdd.distinct(numPartitions))
+  def distinct(numPartitions: Int): JavaRDD[T] = wrapRDD(rdd._distinct(numPartitions))
 
   /**
    * Return a new RDD containing only the elements that satisfy a predicate.
    */
   def filter(f: JFunction[T, java.lang.Boolean]): JavaRDD[T] =
-    wrapRDD(rdd.filter((x => f.call(x).booleanValue())))
+    wrapRDD(rdd._filter((x => f.call(x).booleanValue())))
 
   /**
    * Return a new RDD that is reduced into `numPartitions` partitions.

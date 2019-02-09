@@ -40,7 +40,7 @@ class DoubleRDDFunctions(self: RDD[Double]) extends Logging with Serializable {
    * count of the RDD's elements in one operation.
    */
   def stats(): StatCounter = self.withScope {
-    self.mapPartitions(nums => Iterator(StatCounter(nums))).reduce((a, b) => a.merge(b))
+    self.mapPartitions(nums => Iterator(StatCounter(nums)))._reduce((a, b) => a.merge(b))
   }
 
   /** Compute the mean of this RDD's elements. */
@@ -131,7 +131,7 @@ class DoubleRDDFunctions(self: RDD[Double]) extends Logging with Serializable {
       Iterator(
         items.foldRight((Double.NegativeInfinity, Double.PositiveInfinity)
         )((e: Double, x: (Double, Double)) => (x._1.max(e), x._2.min(e))))
-    }.reduce { (maxmin1, maxmin2) =>
+    }._reduce { (maxmin1, maxmin2) =>
       (maxmin1._1.max(maxmin2._1), maxmin1._2.min(maxmin2._2))
     }
     if (min.isNaN || max.isNaN || max.isInfinity || min.isInfinity ) {
@@ -246,7 +246,7 @@ class DoubleRDDFunctions(self: RDD[Double]) extends Logging with Serializable {
       // reduce() requires a non-empty RDD. This works because the mapPartitions will make
       // non-empty partitions out of empty ones. But it doesn't handle the no-partitions case,
       // which is below
-      self.mapPartitions(histogramPartition(bucketFunction)).reduce(mergeCounters)
+      self.mapPartitions(histogramPartition(bucketFunction))._reduce(mergeCounters)
     }
   }
 

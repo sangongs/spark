@@ -311,13 +311,13 @@ class NewHadoopRDD[K, V](
     locs.getOrElse(split.getLocations.filter(_ != "localhost"))
   }
 
-  override def persist(storageLevel: StorageLevel): this.type = {
+  override def _persist(storageLevel: StorageLevel): this.type = {
     if (storageLevel.deserialized) {
       logWarning("Caching NewHadoopRDDs as deserialized objects usually leads to undesired" +
         " behavior because Hadoop's RecordReader reuses the same Writable object for all records." +
         " Use a map transformation to make copies of the records.")
     }
-    super.persist(storageLevel)
+    super._persist(storageLevel)
   }
 
 }

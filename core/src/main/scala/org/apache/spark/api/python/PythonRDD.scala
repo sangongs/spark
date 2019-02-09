@@ -182,7 +182,7 @@ private[spark] object PythonRDD extends Logging {
       } catch {
         case eof: EOFException => // No-op
       }
-      JavaRDD.fromRDD(sc.sc.parallelize(objs, parallelism))
+      JavaRDD.fromRDD(sc.sc._parallelize(objs, parallelism))
     } finally {
       file.close()
     }

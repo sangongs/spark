@@ -48,13 +48,13 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
   /**
    * Persist this RDD with the default storage level (`MEMORY_ONLY`).
    */
-  def cache(): JavaDoubleRDD = fromRDD(srdd.cache())
+  def cache(): JavaDoubleRDD = fromRDD(srdd._cache())
 
   /**
    * Set this RDD's storage level to persist its values across operations after the first time
    * it is computed. Can only be called once on each RDD.
    */
-  def persist(newLevel: StorageLevel): JavaDoubleRDD = fromRDD(srdd.persist(newLevel))
+  def persist(newLevel: StorageLevel): JavaDoubleRDD = fromRDD(srdd._persist(newLevel))
 
   /**
    * Mark the RDD as non-persistent, and remove all blocks for it from memory and disk.
@@ -77,18 +77,18 @@ class JavaDoubleRDD(val srdd: RDD[scala.Double])
   /**
    * Return a new RDD containing the distinct elements in this RDD.
    */
-  def distinct(): JavaDoubleRDD = fromRDD(srdd.distinct())
+  def distinct(): JavaDoubleRDD = fromRDD(srdd._distinct())
 
   /**
    * Return a new RDD containing the distinct elements in this RDD.
    */
-  def distinct(numPartitions: Int): JavaDoubleRDD = fromRDD(srdd.distinct(numPartitions))
+  def distinct(numPartitions: Int): JavaDoubleRDD = fromRDD(srdd._distinct(numPartitions))
 
   /**
    * Return a new RDD containing only the elements that satisfy a predicate.
    */
   def filter(f: JFunction[JDouble, java.lang.Boolean]): JavaDoubleRDD =
-    fromRDD(srdd.filter(x => f.call(x).booleanValue()))
+    fromRDD(srdd._filter(x => f.call(x).booleanValue()))
 
   /**
    * Return a new RDD that is reduced into `numPartitions` partitions.

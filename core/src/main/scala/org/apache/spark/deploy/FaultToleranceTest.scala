@@ -252,7 +252,7 @@ private object FaultToleranceTest extends App with Logging {
   private def assertUsable() = {
     val f = Future {
       try {
-        val res = sc.parallelize(0 until 10).collect()
+        val res = sc._parallelize(0 until 10).collect()
         assertTrue(res.toList == (0 until 10).toList)
         true
       } catch {

@@ -467,7 +467,7 @@ abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
     }
   }
 
-  protected lazy val singleRowRdd = sparkContext.parallelize(Seq(InternalRow()), 1)
+  protected lazy val singleRowRdd = sparkContext._parallelize(Seq(InternalRow()), 1)
 
   object InMemoryScans extends Strategy {
     def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {

@@ -29,6 +29,7 @@ import scala.collection.generic.Growable
 import scala.collection.mutable.HashMap
 import scala.language.implicitConversions
 import scala.reflect.{classTag, ClassTag}
+import scala.reflect.runtime.universe.{typeTag, TypeTag}
 import scala.util.control.NonFatal
 
 import com.google.common.collect.MapMaker
@@ -715,11 +716,18 @@ class SparkContext(config: SparkConf) extends Logging {
    * @param numSlices number of partitions to divide the collection into
    * @return RDD representing distributed collection
    */
-  def parallelize[T: ClassTag](
+  def _parallelize[T: ClassTag](
       seq: Seq[T],
       numSlices: Int = defaultParallelism): RDD[T] = withScope {
     assertNotStopped()
     new ParallelCollectionRDD[T](this, seq, numSlices, Map[Int, Seq[String]]())
+  }
+
+  def parallelize[T: ClassTag: TypeTag](
+      seq: Seq[T],
+      numSlices: Int = defaultParallelism): RDD[T] = withScope {
+    val rdd = _parallelize(seq, numSlices)
+    rdd.attachOperation(RDDOperation.parallelize(rdd, seq))
   }
 
   /**
@@ -734,7 +742,7 @@ class SparkContext(config: SparkConf) extends Logging {
    * @param numSlices number of partitions to divide the collection into
    * @return RDD representing distributed range
    */
-  def range(
+  def _range(
       start: Long,
       end: Long,
       step: Long = 1,
@@ -752,7 +760,7 @@ class SparkContext(config: SparkConf) extends Logging {
         (safeEnd - safeStart) / step + 1
       }
     }
-    parallelize(0 until numSlices, numSlices).mapPartitionsWithIndex { (i, _) =>
+    _parallelize(0 until numSlices, numSlices).mapPartitionsWithIndex { (i, _) =>
       val partitionStart = (i * numElements) / numSlices * step + start
       val partitionEnd = (((i + 1) * numElements) / numSlices) * step + start
       def getSafeMargin(bi: BigInt): Long =
@@ -794,6 +802,15 @@ class SparkContext(config: SparkConf) extends Logging {
     }
   }
 
+  def range(
+      start: Long,
+      end: Long,
+      step: Long = 1,
+      numSlices: Int = defaultParallelism): RDD[Long] = {
+    val rdd = _range(start, end, step, numSlices)
+    rdd.attachOperation(RDDOperation.range(rdd, start, end, step))
+  }
+
   /** Distribute a local Scala collection to form an RDD.
    *
    * This method is identical to `parallelize`.
@@ -804,7 +821,7 @@ class SparkContext(config: SparkConf) extends Logging {
   def makeRDD[T: ClassTag](
       seq: Seq[T],
       numSlices: Int = defaultParallelism): RDD[T] = withScope {
-    parallelize(seq, numSlices)
+    _parallelize(seq, numSlices)
   }
 
   /**
@@ -827,12 +844,19 @@ class SparkContext(config: SparkConf) extends Logging {
    * @param minPartitions suggested minimum number of partitions for the resulting RDD
    * @return RDD of lines of the text file
    */
-  def textFile(
+  def _textFile(
       path: String,
       minPartitions: Int = defaultMinPartitions): RDD[String] = withScope {
     assertNotStopped()
     hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
       minPartitions).map(pair => pair._2.toString).setName(path)
+  }
+
+  def textFile(
+      path: String,
+      minPartitions: Int = defaultMinPartitions): RDD[String] = {
+    val rdd = _textFile(path, minPartitions)
+    rdd.attachOperation(RDDOperation.textFile(rdd, path))
   }
 
   /**
@@ -1284,7 +1308,7 @@ class SparkContext(config: SparkConf) extends Logging {
       val writables = hadoopFile(path, format,
         kc.writableClass(km).asInstanceOf[Class[Writable]],
         vc.writableClass(vm).asInstanceOf[Class[Writable]], minPartitions)
-      writables.map { case (k, v) => (kc.convert(k), vc.convert(v)) }
+      writables._map { case (k, v) => (kc.convert(k), vc.convert(v)) }
     }
   }
 
@@ -1306,7 +1330,7 @@ class SparkContext(config: SparkConf) extends Logging {
       minPartitions: Int = defaultMinPartitions): RDD[T] = withScope {
     assertNotStopped()
     sequenceFile(path, classOf[NullWritable], classOf[BytesWritable], minPartitions)
-      .flatMap(x => Utils.deserialize[Array[T]](x._2.getBytes, Utils.getContextOrSparkClassLoader))
+      ._flatMap(x => Utils.deserialize[Array[T]](x._2.getBytes, Utils.getContextOrSparkClassLoader))
   }
 
   protected[spark] def checkpointFile[T: ClassTag](path: String): RDD[T] = withScope {

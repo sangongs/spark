@@ -214,7 +214,7 @@ private[sql] object ArrowConverters {
       // Create array to consume iterator so that we can safely close the file
       val batches = getBatchesFromStream(fileStream.getChannel).toArray
       // Parallelize the record batches to create an RDD
-      JavaRDD.fromRDD(sqlContext.sparkContext.parallelize(batches, batches.length))
+      JavaRDD.fromRDD(sqlContext.sparkContext._parallelize(batches, batches.length))
     }
   }
 

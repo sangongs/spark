@@ -84,7 +84,7 @@ class SparkSession private(
   // The call site where this SparkSession was constructed.
   private val creationSite: CallSite = Utils.getCallSite()
 
-  private[sql] def this(sc: SparkContext) {
+  def this(sc: SparkContext) {
     this(sc, None, None, new SparkSessionExtensions)
   }
 

@@ -71,7 +71,7 @@ private[spark] object StratifiedSamplingUtils extends Logging {
       val seqOp = getSeqOp(withReplacement, fractions, rng, counts)
       Iterator(iter.aggregate(zeroU)(seqOp, combOp))
     }
-    mappedPartitionRDD.reduce(combOp)
+    mappedPartitionRDD._reduce(combOp)
   }
 
   /**

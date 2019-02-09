@@ -364,13 +364,13 @@ class HadoopRDD[K, V](
     // Do nothing. Hadoop RDD should not be checkpointed.
   }
 
-  override def persist(storageLevel: StorageLevel): this.type = {
+  override def _persist(storageLevel: StorageLevel): this.type = {
     if (storageLevel.deserialized) {
       logWarning("Caching HadoopRDDs as deserialized objects usually leads to undesired" +
         " behavior because Hadoop's RecordReader reuses the same Writable object for all records." +
         " Use a map transformation to make copies of the records.")
     }
-    super.persist(storageLevel)
+    super._persist(storageLevel)
   }
 
   def getConf: Configuration = getJobConf()

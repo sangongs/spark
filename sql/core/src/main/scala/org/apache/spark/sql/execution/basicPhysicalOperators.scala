@@ -370,7 +370,7 @@ case class RangeExec(range: org.apache.spark.sql.catalyst.plans.logical.Range)
     val rdd = if (start == end || (start < end ^ 0 < step)) {
       new EmptyRDD[InternalRow](sqlContext.sparkContext)
     } else {
-      sqlContext.sparkContext.parallelize(0 until numSlices, numSlices).map(i => InternalRow(i))
+      sqlContext.sparkContext._parallelize(0 until numSlices, numSlices).map(i => InternalRow(i))
     }
     rdd :: Nil
   }
@@ -501,7 +501,7 @@ case class RangeExec(range: org.apache.spark.sql.catalyst.plans.logical.Range)
     val numOutputRows = longMetric("numOutputRows")
     sqlContext
       .sparkContext
-      .parallelize(0 until numSlices, numSlices)
+      ._parallelize(0 until numSlices, numSlices)
       .mapPartitionsWithIndex { (i, _) =>
         val partitionStart = (i * numElements) / numSlices * step + start
         val partitionEnd = (((i + 1) * numElements) / numSlices) * step + start

@@ -168,7 +168,7 @@ class RangePartitioner[K : Ordering : ClassTag, V](
       val sampleSize = math.min(samplePointsPerPartitionHint.toDouble * partitions, 1e6)
       // Assume the input partitions are roughly balanced and over-sample a little bit.
       val sampleSizePerPartition = math.ceil(3.0 * sampleSize / rdd.partitions.length).toInt
-      val (numItems, sketched) = RangePartitioner.sketch(rdd.map(_._1), sampleSizePerPartition)
+      val (numItems, sketched) = RangePartitioner.sketch(rdd._map(_._1), sampleSizePerPartition)
       if (numItems == 0L) {
         Array.empty
       } else {
@@ -190,7 +190,7 @@ class RangePartitioner[K : Ordering : ClassTag, V](
         }
         if (imbalancedPartitions.nonEmpty) {
           // Re-sample imbalanced partitions with the desired sampling probability.
-          val imbalanced = new PartitionPruningRDD(rdd.map(_._1), imbalancedPartitions.contains)
+          val imbalanced = new PartitionPruningRDD(rdd._map(_._1), imbalancedPartitions.contains)
           val seed = byteswap32(-rdd.id - 1)
           val reSampled = imbalanced.sample(withReplacement = false, fraction, seed).collect()
           val weight = (1.0 / fraction).toFloat

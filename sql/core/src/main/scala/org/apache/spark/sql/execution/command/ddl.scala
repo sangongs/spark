@@ -710,7 +710,7 @@ case class AlterTableRecoverPartitionsCommand(
       // gather the fast stats for all the partitions otherwise Hive metastore will list all the
       // files for all the new partitions in sequential way, which is super slow.
       logInfo(s"Gather the fast stats in parallel using $numParallelism tasks.")
-      spark.sparkContext.parallelize(serializedPaths, numParallelism)
+      spark.sparkContext._parallelize(serializedPaths, numParallelism)
         .mapPartitions { paths =>
           val pathFilter = getPathFilter(serializableConfiguration.value)
           paths.map(new Path(_)).map{ path =>

@@ -187,7 +187,7 @@ object MultiLineJsonDataSource extends JsonDataSource {
       conf,
       sparkSession.sparkContext.defaultMinPartitions)
       .setName(s"JsonFile: $name")
-      .values
+      ._values
   }
 
   private def dataToInputStream(dataStream: PortableDataStream): InputStream = {

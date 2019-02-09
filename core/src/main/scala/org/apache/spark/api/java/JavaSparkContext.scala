@@ -131,7 +131,7 @@ class JavaSparkContext(val sc: SparkContext)
   /** Distribute a local Scala collection to form an RDD. */
   def parallelize[T](list: java.util.List[T], numSlices: Int): JavaRDD[T] = {
     implicit val ctag: ClassTag[T] = fakeClassTag
-    sc.parallelize(list.asScala, numSlices)
+    sc._parallelize(list.asScala, numSlices)
   }
 
   /** Get an RDD that has no partitions or elements. */
@@ -150,7 +150,7 @@ class JavaSparkContext(val sc: SparkContext)
   : JavaPairRDD[K, V] = {
     implicit val ctagK: ClassTag[K] = fakeClassTag
     implicit val ctagV: ClassTag[V] = fakeClassTag
-    JavaPairRDD.fromRDD(sc.parallelize(list.asScala, numSlices))
+    JavaPairRDD.fromRDD(sc._parallelize(list.asScala, numSlices))
   }
 
   /** Distribute a local Scala collection to form an RDD. */
@@ -159,7 +159,7 @@ class JavaSparkContext(val sc: SparkContext)
 
   /** Distribute a local Scala collection to form an RDD. */
   def parallelizeDoubles(list: java.util.List[java.lang.Double], numSlices: Int): JavaDoubleRDD =
-    JavaDoubleRDD.fromRDD(sc.parallelize(list.asScala.map(_.doubleValue()), numSlices))
+    JavaDoubleRDD.fromRDD(sc._parallelize(list.asScala.map(_.doubleValue()), numSlices))
 
   /** Distribute a local Scala collection to form an RDD. */
   def parallelizeDoubles(list: java.util.List[java.lang.Double]): JavaDoubleRDD =
@@ -169,14 +169,14 @@ class JavaSparkContext(val sc: SparkContext)
    * Read a text file from HDFS, a local file system (available on all nodes), or any
    * Hadoop-supported file system URI, and return it as an RDD of Strings.
    */
-  def textFile(path: String): JavaRDD[String] = sc.textFile(path)
+  def textFile(path: String): JavaRDD[String] = sc._textFile(path)
 
   /**
    * Read a text file from HDFS, a local file system (available on all nodes), or any
    * Hadoop-supported file system URI, and return it as an RDD of Strings.
    */
   def textFile(path: String, minPartitions: Int): JavaRDD[String] =
-    sc.textFile(path, minPartitions)
+    sc._textFile(path, minPartitions)
 
 
 

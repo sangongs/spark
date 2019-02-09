@@ -148,7 +148,7 @@ private[r] object RRDD {
    * called from R.
    */
   def createRDDFromArray(jsc: JavaSparkContext, arr: Array[Array[Byte]]): JavaRDD[Array[Byte]] = {
-    JavaRDD.fromRDD(jsc.sc.parallelize(arr, arr.length))
+    JavaRDD.fromRDD(jsc.sc._parallelize(arr, arr.length))
   }
 
   /**

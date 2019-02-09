@@ -18,6 +18,7 @@
 package org.apache.spark.rdd
 
 import scala.reflect.ClassTag
+import scala.reflect.runtime.universe.{typeTag, TypeTag}
 
 import org.apache.spark.{Partitioner, RangePartitioner}
 import org.apache.spark.annotation.DeveloperApi
@@ -56,12 +57,21 @@ class OrderedRDDFunctions[K : Ordering : ClassTag,
    * order of the keys).
    */
   // TODO: this currently doesn't work on P other than Tuple2!
-  def sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.length)
+  def _sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.length)
       : RDD[(K, V)] = self.withScope
   {
     val part = new RangePartitioner(numPartitions, self, ascending)
     new ShuffledRDD[K, V, V](self, part)
       .setKeyOrdering(if (ascending) ordering else ordering.reverse)
+  }
+
+  def sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.length)
+      (implicit ktag: TypeTag[K], vtag: TypeTag[V]): RDD[(K, V)] =
+  {
+    val rdd = _sortByKey(ascending, numPartitions)
+    rdd.attachOperation(
+      self.operation.map(OrderedRDDOperation[K, V, P](_).sortByKey(rdd, ascending))
+    )
   }
 
   /**
@@ -94,7 +104,7 @@ class OrderedRDDFunctions[K : Ordering : ClassTag,
       case _ =>
         self
     }
-    rddToFilter.filter { case (k, v) => inRange(k) }
+    rddToFilter._filter { case (k, v) => inRange(k) }
   }
 
 }

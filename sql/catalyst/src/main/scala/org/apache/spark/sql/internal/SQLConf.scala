@@ -528,6 +528,11 @@ object SQLConf {
     .booleanConf
     .createWithDefault(true)
 
+  val RDD_TO_DATASET = buildConf("spark.rdd2dataset")
+    .doc("When true, try to transform RDD operations to Dataset operations to accelerate.")
+    .booleanConf
+    .createWithDefault(true)
+
   val HIVE_VERIFY_PARTITION_PATH = buildConf("spark.sql.hive.verifyPartitionPath")
     .doc("When true, check all the partition paths under the table\'s root directory " +
          "when reading data stored in HDFS. This configuration will be deprecated in the future " +
@@ -1563,6 +1568,8 @@ class SQLConf extends Serializable with Logging {
   @transient protected val reader = new ConfigReader(settings)
 
   /** ************************ Spark SQL Params/Hints ******************* */
+
+  def rdd2dataset: Boolean = getConf(RDD_TO_DATASET)
 
   def optimizerExcludedRules: Option[String] = getConf(OPTIMIZER_EXCLUDED_RULES)
 

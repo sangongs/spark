@@ -200,7 +200,7 @@ object InMemoryFileIndex extends Logging {
       }
       sparkContext.setJobDescription(description)
       sparkContext
-        .parallelize(serializedPaths, numParallelism)
+        ._parallelize(serializedPaths, numParallelism)
         .mapPartitions { pathStrings =>
           val hadoopConf = serializableConfiguration.value
           pathStrings.map(new Path(_)).toSeq.map { path =>

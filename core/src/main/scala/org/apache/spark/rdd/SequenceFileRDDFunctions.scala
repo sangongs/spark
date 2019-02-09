@@ -68,13 +68,13 @@ class SequenceFileRDDFunctions[K <% Writable: ClassTag, V <% Writable : ClassTag
     if (!convertKey && !convertValue) {
       self.saveAsHadoopFile(path, _keyWritableClass, _valueWritableClass, format, jobConf, codec)
     } else if (!convertKey && convertValue) {
-      self.map(x => (x._1, anyToWritable(x._2))).saveAsHadoopFile(
+      self._map(x => (x._1, anyToWritable(x._2))).saveAsHadoopFile(
         path, _keyWritableClass, _valueWritableClass, format, jobConf, codec)
     } else if (convertKey && !convertValue) {
-      self.map(x => (anyToWritable(x._1), x._2)).saveAsHadoopFile(
+      self._map(x => (anyToWritable(x._1), x._2)).saveAsHadoopFile(
         path, _keyWritableClass, _valueWritableClass, format, jobConf, codec)
     } else if (convertKey && convertValue) {
-      self.map(x => (anyToWritable(x._1), anyToWritable(x._2))).saveAsHadoopFile(
+      self._map(x => (anyToWritable(x._1), anyToWritable(x._2))).saveAsHadoopFile(
         path, _keyWritableClass, _valueWritableClass, format, jobConf, codec)
     }
   }

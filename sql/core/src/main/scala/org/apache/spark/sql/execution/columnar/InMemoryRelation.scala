@@ -130,7 +130,7 @@ case class CachedRDDBuilder(
 
         def hasNext: Boolean = rowIterator.hasNext
       }
-    }.persist(storageLevel)
+    }._persist(storageLevel)
 
     cached.setName(
       tableName.map(n => s"In-memory table $n")

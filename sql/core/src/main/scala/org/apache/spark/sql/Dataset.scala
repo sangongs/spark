@@ -1635,7 +1635,7 @@ class Dataset[T] private[sql](
   @Experimental
   @InterfaceStability.Evolving
   def reduce(func: (T, T) => T): T = withNewRDDExecutionId {
-    rdd.reduce(func)
+    rdd._reduce(func)
   }
 
   /**
