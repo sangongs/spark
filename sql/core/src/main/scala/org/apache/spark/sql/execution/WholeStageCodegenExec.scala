@@ -579,9 +579,11 @@ case class WholeStageCodegenExec(child: SparkPlan)(val codegenStageId: Int)
 
   override def doExecute(): RDD[InternalRow] = {
     val (ctx, cleanedSource) = doCodeGen()
+
+    val references = ctx.references.toArray
     // try to compile and fallback if it failed
     val (_, maxCodeSize) = try {
-      CodeGenerator.compile(cleanedSource)
+      CodeGenerator.compile(cleanedSource, references)
     } catch {
       case NonFatal(_) if !Utils.isTesting && sqlContext.conf.codegenFallback =>
         // We should already saw the error message
@@ -603,15 +605,13 @@ case class WholeStageCodegenExec(child: SparkPlan)(val codegenStageId: Int)
       }
     }
 
-    val references = ctx.references.toArray
-
     val durationMs = longMetric("pipelineTime")
 
     val rdds = child.asInstanceOf[CodegenSupport].inputRDDs()
     assert(rdds.size <= 2, "Up to two input RDDs can be supported")
     if (rdds.length == 1) {
       rdds.head.mapPartitionsWithIndex { (index, iter) =>
-        val (clazz, _) = CodeGenerator.compile(cleanedSource)
+        val (clazz, _) = CodeGenerator.compile(cleanedSource, references)
         val buffer = clazz.generate(references).asInstanceOf[BufferedRowIterator]
         buffer.init(index, Array(iter))
         new Iterator[InternalRow] {

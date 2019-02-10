@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.catalyst.expressions.codegen
 
-import java.io.ByteArrayInputStream
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import java.util.{Map => JavaMap}
 
 import scala.collection.JavaConverters._
@@ -28,8 +28,9 @@ import scala.util.control.NonFatal
 
 import com.google.common.cache.{CacheBuilder, CacheLoader}
 import com.google.common.util.concurrent.{ExecutionError, UncheckedExecutionException}
+import javassist.bytecode.{ClassFile => CF, InstructionPrinter, MethodInfo, Opcode}
 import org.codehaus.commons.compiler.CompileException
-import org.codehaus.janino.{ByteArrayClassLoader, ClassBodyEvaluator, InternalCompilerException, SimpleCompiler}
+import org.codehaus.janino.{ByteArrayClassLoader, ClassBodyEvaluator, InternalCompilerException, Parser, Scanner, SimpleCompiler, TokenType}
 import org.codehaus.janino.util.ClassFile
 
 import org.apache.spark.{SparkEnv, TaskContext, TaskKilledException}
@@ -46,6 +47,109 @@ import org.apache.spark.unsafe.Platform
 import org.apache.spark.unsafe.array.ByteArrayMethods
 import org.apache.spark.unsafe.types._
 import org.apache.spark.util.{ParentClassLoader, Utils}
+
+class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() with Logging{
+  var classes : java.util.Map[String, Array[Byte]] = null
+  var className = "org.apache.spark.sql.catalyst.expressions.GeneratedClass"
+  override def cook(classes : java.util.Map[String, Array[Byte]]) {
+  // logWarning(s"saving classes ${classes.keySet}")
+    this.classes = classes
+  }
+
+  override def cook(scanner: Scanner) {
+    compileToByteCode(scanner)
+  }
+
+  def compileToByteCode(scanner: Scanner) {
+    val parser = new Parser(scanner)
+    val cu = makeCompilationUnit(parser)
+    val cd = addPackageMemberClassDeclaration(scanner.location(), cu);
+    while (!parser.peek(TokenType.END_OF_INPUT)) {
+      parser.parseClassBodyDeclaration(cd);
+    }
+    cook(cu)
+    optimizeByteCode("org.apache.spark.sql.catalyst.expressions.GeneratedClass$" +
+      "GeneratedIteratorForCodegenStage1")
+  }
+
+  def optimizeByteCode(cName: String): Unit = {
+    if (! classes.containsKey(cName)) return
+    // load bytecode
+    val is = new ByteArrayInputStream(classes.get(cName))
+    val cf = new CF(new DataInputStream(is))
+
+    val mi = cf.getMethod("agg_doConsume_0$")
+    if (mi == null) {
+      logWarning(s"no agg_doConsume_0() in ${cf.getName}, methods are:")
+      for (m <- cf.getMethods().toArray().toSeq.asInstanceOf[Seq[MethodInfo]])
+        logWarning(s"${m.getName}")
+      return
+    }
+
+    // {
+    //   val ca = mi.getCodeAttribute()
+    //   val ci = ca.iterator
+    //   while (ci.hasNext) {
+    //     val index = ci.next
+    //     logWarning(s"$index: " +
+    //       s"${InstructionPrinter.instructionString(ci, index, ci.get.getConstPool)}")
+    //   }
+    // }
+    //
+    // val ci = mi.getCodeAttribute().iterator
+    // for (i <- 29 until 38) ci.writeByte(Opcode.NOP, i)
+    // for (i <- 42 until 45) ci.writeByte(Opcode.NOP, i)
+    // for (i <- 49 until 76) ci.writeByte(Opcode.NOP, i)
+    // ci.writeByte(Opcode.LADD, 74)
+    // ci.writeByte(Opcode.LSTORE, 75)
+    // ci.writeByte(4, 76)
+    //
+    // {
+    //   val ca = mi.getCodeAttribute()
+    //   val ci = ca.iterator
+    //   while (ci.hasNext) {
+    //     val index = ci.next
+    //     logWarning(s"$index: " +
+    //       s"${InstructionPrinter.instructionString(ci, index, ci.get.getConstPool)}")
+    //   }
+    // }
+
+    logWarning(s"${references(1).getClass.getName}")
+    try {
+      val refClass = references(1).getClass
+      val refis = refClass.getClassLoader.getResourceAsStream(refClass.getName)
+      val refcf = new CF(new DataInputStream(refis))
+      for (mi <- refcf.getMethods.toArray().toSeq.asInstanceOf[Seq[MethodInfo]]) {
+        logWarning(s"${mi.getName}")
+
+        {
+          val ca = mi.getCodeAttribute()
+          val ci = ca.iterator
+          while (ci.hasNext) {
+            val index = ci.next
+            logWarning(s"$index: " +
+              s"${InstructionPrinter.instructionString(ci, index, ci.get.getConstPool)}")
+          }
+        }
+      }
+    } catch {
+      case e: Exception => e.printStackTrace(new java.io.PrintStream(System.out))
+    }
+
+    // replace with new bytecode
+    val os = new ByteArrayOutputStream()
+    cf.write(new DataOutputStream(os))
+    classes.put(cName, os.toByteArray())
+  }
+
+  override def getClazz() : Class[_] = {
+    super.cook(classes)
+    val resultField = classOf[SimpleCompiler].getDeclaredField("result")
+    resultField.setAccessible(true)
+    val loader = resultField.get(this).asInstanceOf[ByteArrayClassLoader]
+    loader.loadClass(this.className)
+  }
+}
 
 /**
  * Java source for evaluating an [[Expression]] given a [[InternalRow]] of input.
@@ -1229,12 +1333,15 @@ object CodeGenerator extends Logging {
   // bytecode instruction
   final val MUTABLESTATEARRAY_SIZE_LIMIT = 32768
 
+  var references: Array[Any] = null
+
   /**
    * Compile the Java source code into a Java class, using Janino.
    *
    * @return a pair of a generated class and the max bytecode size of generated functions.
    */
-  def compile(code: CodeAndComment): (GeneratedClass, Int) = try {
+  def compile(code: CodeAndComment, references: Array[Any] = null): (GeneratedClass, Int) = try {
+    this.references = references
     cache.get(code)
   } catch {
     // Cache.get() may wrap the original exception. See the following URL
@@ -1248,7 +1355,7 @@ object CodeGenerator extends Logging {
    * Compile the Java source code into a Java class, using Janino.
    */
   private[this] def doCompile(code: CodeAndComment): (GeneratedClass, Int) = {
-    val evaluator = new ClassBodyEvaluator()
+    val evaluator = new MyClassBodyEvaluator(references)
 
     // A special classloader used to wrap the actual parent classloader of
     // [[org.codehaus.janino.ClassBodyEvaluator]] (see CodeGenerator.doCompile). This classloader
@@ -1288,7 +1395,8 @@ object CodeGenerator extends Logging {
 
     val maxCodeSize = try {
       evaluator.cook("generated.java", code.body)
-      updateAndGetCompilationStats(evaluator)
+      0
+      // updateAndGetCompilationStats(evaluator)
     } catch {
       case e: InternalCompilerException =>
         val msg = s"failed to compile: $e"
