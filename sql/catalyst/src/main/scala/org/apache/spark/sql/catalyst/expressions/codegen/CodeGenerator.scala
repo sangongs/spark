@@ -30,12 +30,12 @@ import scala.util.control.NonFatal
 import com.google.common.cache.{CacheBuilder, CacheLoader}
 import com.google.common.util.concurrent.{ExecutionError, UncheckedExecutionException}
 import javassist.ClassPool
-import javassist.bytecode.{ClassFile => CF, InstructionPrinter, MethodInfo, Opcode}
+import javassist.bytecode.{Bytecode, ClassFile => CF, InstructionPrinter, MethodInfo, Opcode}
 import org.codehaus.commons.compiler.CompileException
 import org.codehaus.janino.{ByteArrayClassLoader, ClassBodyEvaluator, InternalCompilerException, Parser, Scanner, SimpleCompiler, TokenType}
 import org.codehaus.janino.util.ClassFile
 
-import org.apache.spark.{SparkEnv, TaskContext, TaskKilledException}
+import org.apache.spark.{SparkConf, SparkEnv, TaskContext, TaskKilledException}
 import org.apache.spark.executor.InputMetrics
 import org.apache.spark.internal.Logging
 import org.apache.spark.metrics.source.CodegenMetrics
@@ -50,12 +50,7 @@ import org.apache.spark.unsafe.array.ByteArrayMethods
 import org.apache.spark.unsafe.types._
 import org.apache.spark.util.{ParentClassLoader, Utils}
 
-object MyClassBodyEvaluator {
-  var doOptimizeByteCode = true
-}
-
 class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() with Logging{
-  import MyClassBodyEvaluator._
 
   var classes : java.util.Map[String, Array[Byte]] = null
   var className = "org.apache.spark.sql.catalyst.expressions.GeneratedClass"
@@ -76,14 +71,15 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
       parser.parseClassBodyDeclaration(cd);
     }
     cook(cu)
-    if (doOptimizeByteCode) {
-      optimizeByteCode("org.apache.spark.sql.catalyst.expressions.GeneratedClass$" +
-        "GeneratedIteratorForCodegenStage1")
-      // try {
-      //   optimizeByteCode()
-      // } catch {
-      //   case e: Exception => e.printStackTrace(new java.io.PrintStream(System.out))
-      // }
+    if (SQLConf.get.optmizeBytecode) {
+      // optimizeByteCode("org.apache.spark.sql.catalyst.expressions.GeneratedClass$" +
+      //   "GeneratedIteratorForCodegenStage1")
+      try {
+        optimizeByteCode()
+      } catch {
+        case e: Exception => e.printStackTrace(new java.io.PrintStream(System.out))
+        case e: Error => e.printStackTrace(new java.io.PrintStream(System.out))
+      }
     }
   }
 
@@ -101,7 +97,18 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
     var optimized = false
     for (mi <- mis.asScala) {
       val m = mi.asInstanceOf[MethodInfo]
-      if (m.getName.contains("doConsume")) optimized ||= optimizeMethod(cf, m)
+      logWarning(s"in class $cName")
+      // printAsm(m)
+      var methodOptimized = false
+      if (m.getName.contains("doConsume")) {
+        methodOptimized = optimizeMethod(cf, m) || methodOptimized
+      }
+      methodOptimized = optimizeBox(cf, m) || methodOptimized
+      // printAsm(m)
+      if (methodOptimized) {
+        // miUpdated(m)
+        optimized = true
+      }
     }
     if (optimized) {
       val os = new ByteArrayOutputStream()
@@ -110,7 +117,49 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
     }
   }
 
+  // replace boxings with MyBox
+  def optimizeBox(cf: CF, m: MethodInfo): Boolean = {
+    logWarning(s"Optimizing boxings in ${cf.getName}.${m.getName}}")
+    var optimized = false
+    val ci = m.getCodeAttribute.iterator
+    val cp = m.getConstPool
+    val boxClass = cp.addClassInfo("org.apache.spark.sql.execution.MyBox")
+    val boxLong = cp.addMethodrefInfo(boxClass, "boxJ", "(J)Ljava/lang/Long;")
+    val boxInt = cp.addMethodrefInfo(boxClass, "boxI", "(I)Ljava/lang/Integer;")
+    val boxDouble = cp.addMethodrefInfo(boxClass, "boxD", "(D)Ljava/lang/Double;")
+    while (ci.hasNext) {
+      val index = ci.next
+      if (ci.byteAt(index) == Opcode.INVOKESTATIC) {
+        val n = ci.u16bitAt(index + 1)
+        if (cp.getMethodrefClassName(n) == "java.lang.Long" &&
+            cp.getMethodrefName(n) == "valueOf" &&
+            cp.getMethodrefType(n) == "(J)Ljava/lang/Long;") {
+          logWarning(s"updating boxing of Long @ $index")
+          ci.write16bit(boxLong, index + 1)
+          optimized = true
+        }
+        if (cp.getMethodrefClassName(n) == "java.lang.Integer" &&
+            cp.getMethodrefName(n) == "valueOf" &&
+            cp.getMethodrefType(n) == "(I)Ljava/lang/Integer;") {
+          logWarning(s"updating boxing of Integer @ $index")
+          ci.write16bit(boxInt, index + 1)
+          optimized = true
+        }
+        if (cp.getMethodrefClassName(n) == "java.lang.Double" &&
+            cp.getMethodrefName(n) == "valueOf" &&
+            cp.getMethodrefType(n) == "(D)Ljava/lang/Double;") {
+          logWarning(s"updating boxing of Double @ $index")
+          ci.write16bit(boxDouble, index + 1)
+          optimized = true
+        }
+      }
+    }
+    // printAsm(m)
+    optimized
+  }
+
   def printAsm(mi: MethodInfo) {
+    logWarning(s"byteCode of ${mi.getName}")
     val ci = mi.getCodeAttribute.iterator
     while (ci.hasNext) {
       val index = ci.next
@@ -120,19 +169,18 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
   }
 
   def miUpdated(mi: MethodInfo) {
-    printAsm(mi)
+    // printAsm(mi)
     mi.getCodeAttribute().computeMaxStack()
     mi.rebuildStackMap(new ClassPool(true))
   }
 
+  // match checkcast references(n)
   def optimizeMethod(cf: CF, mi: MethodInfo): Boolean = {
     logWarning(s"Optimizing ${cf.getName}.${mi.getName}}")
     val ca = mi.getCodeAttribute
     val cp = mi.getConstPool
     val ci = ca.iterator
     val indices = new ArrayBuffer[Int]()
-
-    printAsm(mi)
 
     while (ci.hasNext) {
       val index = ci.next
@@ -152,9 +200,10 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
                                   "org.apache.spark.sql.expressions.Aggregator",
                                   "reduce")
           }
-          if (cast == "scala.Function1") {
-            logWarning(s"found Function1@${indices(i + 3)}")
-          }
+          // if (cast == "scala.Function1") {
+          //   logWarning(s"found Function1@${indices(i + 3)}")
+          //   return tryOptimizeUDF(mi, indices, i, "scala.Function1", "apply")
+          // }
         }
       }
     }
@@ -162,8 +211,10 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
     false
   }
 
+  // match invokevirtual
   def tryOptimizeUDF(mi: MethodInfo, indices: Seq[Int], i: Int,
                             className: String, methodName: String): Boolean = {
+    printAsm(mi)
     val ci = mi.getCodeAttribute.iterator
     val cp = mi.getConstPool
     for (j <- i until indices.length) {
@@ -175,12 +226,21 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
           return optimizeUDF(mi, indices, i, j, methodName)
         }
       }
+      if (ci.byteAt(indices(j)) == Opcode.INVOKEINTERFACE) {
+        val n = ci.u16bitAt(indices(j) + 1)
+        if (cp.getInterfaceMethodrefClassName(n) == className &&
+            cp.getInterfaceMethodrefName(n) == methodName) {
+          logWarning(s"found invoke $className.$methodName @ ${indices(j)}")
+          return optimizeUDF(mi, indices, i, j, methodName)
+        }
+      }
     }
 
     logWarning(s"no invoke $className.$methodName found")
     return false
   }
 
+  // look for methods
   def optimizeUDF(mi: MethodInfo, indices: Seq[Int], i: Int, j: Int,
                   methodName: String): Boolean = {
     val ci = mi.getCodeAttribute.iterator
@@ -192,22 +252,27 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
       case Opcode.ICONST_3 => 3
       case Opcode.ICONST_4 => 4
       case Opcode.ICONST_5 => 5
+      case Opcode.BIPUSH => ci.byteAt(indices(i + 1) + 1)
     }
     var primitiveMethod: Method = null
-    val methods = references(n).getClass.getMethods
+    var objectMethod: Method = null
+    val methods = references(n).getClass.getDeclaredMethods
     for (method <- methods.toSeq) {
       val m = method.asInstanceOf[Method]
-      if (m.getName == methodName &&
-          m.getParameterTypes()(0).getName != "java.lang.Object") {
+      logWarning(s"method: ${m.getName}${getMethodDescriptor(m)}")
+      if (m.getName == methodName && m.getReturnType.isPrimitive ) {
+        assert(primitiveMethod == null)
         primitiveMethod = m
       }
+      if (m.getName == methodName && m.getReturnType.getName == "java.lang.Object") {
+        assert(objectMethod == null)
+        objectMethod = m
+      }
     }
-    if (primitiveMethod == null) {
-      logWarning(s"not found primitive $methodName method")
-      return false
-    }
+    assert(primitiveMethod != null)
+    assert(objectMethod != null)
 
-    return optimizeInvoke(mi, indices, i, j, n, primitiveMethod)
+    return optimizeInvoke(mi, indices, i, j, n, objectMethod, primitiveMethod)
   }
 
   def getDescriptorForClass(c: Class[_]): String = {
@@ -236,60 +301,119 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
   }
 
   def optimizeInvoke(mi: MethodInfo, indices: Seq[Int],
-                     i: Int, j: Int, n: Int, m: Method): Boolean = {
-    val ci = mi.getCodeAttribute.iterator
+                     i: Int, j: Int, n: Int, om: Method, pm: Method): Boolean = {
+    val ca = mi.getCodeAttribute
+    val ci = ca.iterator
     val cp = mi.getConstPool
-    val c = m.getParameterCount
-    logWarning(s"optimizing Invoke ${m.getName}($c)")
+    val pCount = pm.getParameterCount
+    val isInterface = ci.byteAt(indices(j)) == Opcode.INVOKEINTERFACE
+    assert(pm.getParameterCount == om.getParameterCount)
+    if (isInterface) {
+      assert(getMethodDescriptor(om) == cp.getInterfaceMethodrefType(ci.u16bitAt(indices(j) + 1)))
+    } else assert(getMethodDescriptor(om) == cp.getMethodrefType(ci.u16bitAt(indices(j) + 1)))
+    logWarning(s"replacing ${om.getName}${getMethodDescriptor(om)} with " +
+               s"${pm.getName}${getMethodDescriptor(pm)}")
     val clz = cp.addClassInfo(references(n).getClass.getName)
-    val mthd = cp.addMethodrefInfo(clz, m.getName, getMethodDescriptor(m))
+    val mthd = cp.addMethodrefInfo(clz, pm.getName, getMethodDescriptor(pm))
+    val bClz = cp.addClassInfo("org.apache.spark.sql.execution.MyBox")
+
+    // printAsm(mi)
+
+    // update checkcast to concrete class
     ci.write16bit(clz, indices(i + 3) + 1)
 
-    for (k <- Range(i + 4, j, 3)) {
-      if (ci.byteAt(indices(k)) != Opcode.ALOAD_0) {
-        logWarning("no aload_0 fount")
-        return false
-      }
-      if (ci.byteAt(indices(k + 1)) != Opcode.GETFIELD) {
-        logWarning("no getfield fount")
-        return false
-      }
-      if (ci.byteAt(indices(k + 2)) != Opcode.INVOKESTATIC) {
-        logWarning("no invokestatic fount")
-        return false
-      }
-      // remove boxing
-      ci.writeByte(Opcode.NOP, indices(k + 2))
-      ci.writeByte(Opcode.NOP, indices(k + 2) + 1)
-      ci.writeByte(Opcode.NOP, indices(k + 2) + 2)
-    }
+    // for (k <- Range(i + 4, j, 3)) {
+    //   if (ci.byteAt(indices(k)) != Opcode.ALOAD_0) {
+    //     logWarning("no aload_0 fount")
+    //     return false
+    //   }
+    //   if (ci.byteAt(indices(k + 1)) != Opcode.GETFIELD) {
+    //     logWarning("no getfield fount")
+    //     return false
+    //   }
+    //   if (ci.byteAt(indices(k + 2)) != Opcode.INVOKESTATIC) {
+    //     logWarning("no invokestatic fount")
+    //     return false
+    //   }
+    //   // remove boxing
+    //   ci.writeByte(Opcode.NOP, indices(k + 2))
+    //   ci.writeByte(Opcode.NOP, indices(k + 2) + 1)
+    //   ci.writeByte(Opcode.NOP, indices(k + 2) + 2)
+    // }
 
-    ci.write16bit(mthd, indices(j) + 1)
+    // update invokevirtual to primitive method
+    if (isInterface) {
+      ci.writeByte(Opcode.INVOKEVIRTUAL, indices(j))
+      ci.write16bit(mthd, indices(j) + 1)
+      ci.writeByte(Opcode.NOP, indices(j) + 3)
+      ci.writeByte(Opcode.NOP, indices(j) + 4)
+    } else ci.write16bit(mthd, indices(j) + 1)
 
-    if (ci.byteAt(indices(j + 1)) != Opcode.ASTORE) {logWarning("not astore"); return false}
-    if (ci.byteAt(indices(j + 2)) != Opcode.ALOAD) {logWarning("not aload"); return false}
-    if (ci.byteAt(indices(j + 3)) != Opcode.IFNULL) {logWarning("not ifnull"); return false}
+    // if (ci.byteAt(indices(j + 1)) != Opcode.ASTORE) {logWarning("not astore"); return false}
+    // if (ci.byteAt(indices(j + 2)) != Opcode.ALOAD) {logWarning("not aload"); return false}
+    // if (ci.byteAt(indices(j + 3)) != Opcode.IFNULL) {logWarning("not ifnull"); return false}
 
-    val branch1 = indices(j + 3) + ci.u16bitAt(indices(j + 3) + 1)
-
-    if (ci.byteAt(indices(j + 4)) != Opcode.ALOAD) {logWarning("not aload"); return false}
-    if (ci.byteAt(indices(j + 5)) != Opcode.CHECKCAST) {logWarning("not checkcast"); return false}
-    if (ci.byteAt(indices(j + 6)) != Opcode.INVOKEVIRTUAL) {
-      logWarning("not invokevirtual")
-      return false
-    }
+    // val branch1 = indices(j + 3) + ci.s16bitAt(indices(j + 3) + 1)
+    //
+    // if (ci.byteAt(indices(j + 4)) != Opcode.ALOAD) {logWarning("not aload"); return false}
+    // if (ci.byteAt(indices(j + 5)) != Opcode.CHECKCAST) {logWarning("not checkcast");return false}
+    // if (ci.byteAt(indices(j + 6)) != Opcode.INVOKEVIRTUAL) {
+    //   logWarning("not invokevirtual")
+    //   return false
+    // }
 
     // remove unbox
-    for (k <- indices(j + 1) until indices(j + 7)) ci.writeByte(Opcode.NOP, k)
+    // for (k <- indices(j + 1) until indices(j + 7)) ci.writeByte(Opcode.NOP, k)
+    //
+    // if (ci.byteAt(indices(j + 8)) != Opcode.GOTO) {logWarning("not goto"); return false}
+    //
+    // val branch2 = indices(j + 8) + ci.s16bitAt(indices(j + 8) + 1)
+    //
+    // if (indices(j + 9) != branch1) {logWarning(s"${indices(j + 9)} != ${branch1}"); return false}
+    //
+    // // remove goto & branch2
+    // for (k <- indices(j + 8) until branch2) ci.writeByte(Opcode.NOP, k)
 
-    if (ci.byteAt(indices(j + 8)) != Opcode.GOTO) {logWarning("not goto"); return false}
+    // add boxing after invoking primitive
+    val boxMethod = pm.getReturnType match {
+      case x if x == classOf[Long] => cp.addMethodrefInfo(bClz, "boxJ", "(J)Ljava/lang/Long;")
+      case x if x == classOf[Int] => cp.addMethodrefInfo(bClz, "boxI", "(I)Ljava/lang/Integer;")
+      case x if x == classOf[Boolean] => cp.addMethodrefInfo(bClz, "boxZ", "(Z)Ljava/lang/Boolean;")
+      case x if x == classOf[Double] => cp.addMethodrefInfo(bClz, "boxD", "(D)Ljava/lang/Double;")
+    }
+    ci.insertExGap(indices(j + 1), 3)
+    ci.writeByte(Opcode.INVOKESTATIC, indices(j + 1))
+    ci.write16bit(boxMethod, indices(j + 1) + 1)
 
-    val branch2 = indices(j + 8) + ci.u16bitAt(indices(j + 8) + 1)
+    /* add unboxing before invoking primitive */
+    val bc = new Bytecode(cp)
+    val pTypes = pm.getParameterTypes
+    // store parameters to local
+    var locals = ca.getMaxLocals
+    for (k <- Range(pCount, 0, -1)) {
+      bc.addAstore(locals)
+      locals += 1
+    }
+    ca.setMaxLocals(locals)
+    // unbox
+    for (k <- 0 until pCount) {
+      locals -= 1
+      bc.addAload(locals)
+      val tpe = pTypes(k)
+      tpe match {
+        case x if x == classOf[Long] =>
+          bc.addInvokevirtual("java.lang.Long", "longValue", "()J")
+        case x if x == classOf[Int] =>
+          bc.addInvokevirtual("java.lang.Integer", "intValue", "()I")
+        case x if x == classOf[Double] =>
+          bc.addInvokevirtual("java.lang.Double", "doubleValue", "()D")
+        case x if x == classOf[Boolean] =>
+          bc.addInvokevirtual("java.lang.Boolean", "booleanValue", "()Z")
+        case x if x == classOf[java.lang.Long] =>
+      }
+    }
+    ci.insertEx(indices(j), bc.get)
 
-    if (indices(j + 9) != branch1) {logWarning(s"${indices(j + 9)} != ${branch1}"); return false}
-
-    // remove goto & branch2
-    for (k <- indices(j + 8) until branch2) ci.writeByte(Opcode.NOP, k)
 
     miUpdated(mi)
     return true

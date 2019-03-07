@@ -205,4 +205,63 @@ object GenerateSafeProjection extends CodeGenerator[Seq[Expression], Projection]
     val resultRow = new SpecificInternalRow(expressions.map(_.dataType))
     clazz.generate(ctx.references.toArray :+ resultRow).asInstanceOf[Projection]
   }
+
+  def createToObject(exprs: Seq[Expression]): ProjectionToObject = {
+    val expressions = canonicalize(exprs)
+    val ctx = newCodeGenContext()
+    val expressionCodes = expressions.zipWithIndex.map {
+      case (NoOp, _) => ""
+      case (e, i) =>
+        val evaluationCode = e.genCode(ctx)
+        val converter = convertToSafe(ctx, evaluationCode.value, e.dataType)
+        evaluationCode.code +
+          s"""
+          //   if (${evaluationCode.isNull}) {
+          //     mutableRow.setNullAt($i);
+          //   } else {
+              ${converter.code}
+              _ret_ = ${converter.value};
+          //     ${CodeGenerator.setColumn("mutableRow", e.dataType, i, converter.value)};
+          //   }
+          """
+    }
+    val allExpressions = ctx.splitExpressionsWithCurrentInputs(expressionCodes)
+
+    val codeBody = s"""
+      public java.lang.Object generate(Object[] references) {
+        return new SpecificSafeProjection(references);
+      }
+
+      class SpecificSafeProjection extends ${classOf[ProjectionToObject].getName} {
+
+        private Object[] references;
+        ${ctx.declareMutableStates()}
+
+        public SpecificSafeProjection(Object[] references) {
+          this.references = references;
+          ${ctx.initMutableStates()}
+        }
+
+        public void initialize(int partitionIndex) {
+          ${ctx.initPartition()}
+        }
+
+        public java.lang.Object apply(java.lang.Object _i) {
+          InternalRow ${ctx.INPUT_ROW} = (InternalRow) _i;
+          Object _ret_ = null;
+          $allExpressions
+          return _ret_;
+        }
+
+        ${ctx.declareAddedFunctions()}
+      }
+    """
+
+    val code = CodeFormatter.stripOverlappingComments(
+      new CodeAndComment(codeBody, ctx.getPlaceHolderToComments()))
+    logDebug(s"code for ${expressions.mkString(",")}:\n${CodeFormatter.format(code)}")
+
+    val (clazz, _) = CodeGenerator.compile(code)
+    clazz.generate(ctx.references.toArray).asInstanceOf[ProjectionToObject]
+  }
 }

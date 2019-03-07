@@ -150,6 +150,11 @@ object SQLConf {
     }
   }
 
+  val OPTIMIZE_BYTECODE = buildConf("spark.optbc")
+    .doc("Whether optimize bytecode or not")
+    .booleanConf
+    .createWithDefault(false)
+
   val OPTIMIZER_EXCLUDED_RULES = buildConf("spark.sql.optimizer.excludedRules")
     .doc("Configures a list of rules to be disabled in the optimizer, in which the rules are " +
       "specified by their rule names and separated by comma. It is not guaranteed that all the " +
@@ -1563,6 +1568,8 @@ class SQLConf extends Serializable with Logging {
   @transient protected val reader = new ConfigReader(settings)
 
   /** ************************ Spark SQL Params/Hints ******************* */
+
+  def optmizeBytecode: Boolean = getConf(OPTIMIZE_BYTECODE)
 
   def optimizerExcludedRules: Option[String] = getConf(OPTIMIZER_EXCLUDED_RULES)
 

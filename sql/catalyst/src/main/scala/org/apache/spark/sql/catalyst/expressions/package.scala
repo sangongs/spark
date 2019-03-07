@@ -78,6 +78,16 @@ package object expressions  {
     def initialize(partitionIndex: Int): Unit = {}
   }
 
+  abstract class ProjectionToObject extends (InternalRow => Object) {
+
+    /**
+     * Initializes internal states given the current partition index.
+     * This is used by nondeterministic expressions to set initial states.
+     * The default implementation does nothing.
+     */
+    def initialize(partitionIndex: Int): Unit = {}
+  }
+
   /**
    * An identity projection. This returns the input row.
    */
