@@ -101,9 +101,12 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
       // printAsm(m)
       var methodOptimized = false
       if (m.getName.contains("doConsume")) {
-        methodOptimized = optimizeMethod(cf, m) || methodOptimized
+        if (optimizeMethod(cf, m)) {
+          optimizeBox(cf, m)
+          methodOptimized = true
+        }
       }
-      methodOptimized = optimizeBox(cf, m) || methodOptimized
+      // methodOptimized = optimizeBox(cf, m) || methodOptimized
       // printAsm(m)
       if (methodOptimized) {
         // miUpdated(m)
