@@ -72,6 +72,7 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
     }
     cook(cu)
     if (SQLConf.get.optmizeBytecode) {
+      logWarning("Bytecode optimization start")
       // optimizeByteCode("org.apache.spark.sql.catalyst.expressions.GeneratedClass$" +
       //   "GeneratedIteratorForCodegenStage1")
       try {
@@ -80,6 +81,7 @@ class MyClassBodyEvaluator(references: Array[Any]) extends ClassBodyEvaluator() 
         case e: Exception => e.printStackTrace(new java.io.PrintStream(System.out))
         case e: Error => e.printStackTrace(new java.io.PrintStream(System.out))
       }
+      logWarning("Bytecode optimization end")
     }
   }
 
