@@ -36,6 +36,7 @@ import org.apache.spark.{SparkEnv, TaskContext, TaskKilledException}
 import org.apache.spark.executor.InputMetrics
 import org.apache.spark.internal.Logging
 import org.apache.spark.metrics.source.CodegenMetrics
+import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.Block._
@@ -116,6 +117,8 @@ private[codegen] case class NewFunctionSpec(
 class CodegenContext {
 
   import CodeGenerator._
+
+  var encoder: Encoder[_] = null
 
   /**
    * Holding a list of objects that could be used passed into generated class.

@@ -1638,6 +1638,10 @@ class Dataset[T] private[sql](
     rdd.reduce(func)
   }
 
+  def reduceTyped(func: (T, T) => T): T = withNewRDDExecutionId {
+    rddTyped.reduce(func)
+  }
+
   /**
    * :: Experimental ::
    * (Java-specific)
@@ -3027,6 +3031,10 @@ class Dataset[T] private[sql](
     sparkSession.sessionState.executePlan(deserialized)
   }
 
+  @transient private lazy val typedRddQueryExecution: QueryExecution = {
+    sparkSession.sessionState.executePlan(logicalPlan)
+  }
+
   /**
    * Represents the content of the Dataset as an `RDD` of `T`.
    *
@@ -3038,6 +3046,10 @@ class Dataset[T] private[sql](
     rddQueryExecution.toRdd.mapPartitions { rows =>
       rows.map(_.get(0, objectType).asInstanceOf[T])
     }
+  }
+
+  lazy val rddTyped: RDD[T] = {
+    typedRddQueryExecution.toTypedRdd[T](encoder)
   }
 
   /**

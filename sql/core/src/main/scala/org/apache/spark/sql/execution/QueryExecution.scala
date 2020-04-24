@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets
 import java.sql.{Date, Timestamp}
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
+import org.apache.spark.sql.{AnalysisException, Encoder, Row, SparkSession}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.UnsupportedOperationChecker
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReturnAnswer}
@@ -78,6 +78,9 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) {
 
   /** Internal version of the RDD. Avoids copies and has no schema */
   lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
+
+
+  def toTypedRdd[T](encoder: Encoder[T]): RDD[T] = executedPlan.executeTyped[T](encoder)
 
   /**
    * Prepares a planned [[SparkPlan]] for execution by inserting shuffle operations and internal
@@ -239,6 +242,12 @@ class QueryExecution(val sparkSession: SparkSession, val logical: LogicalPlan) {
     def codegen(): Unit = {
       // scalastyle:off println
       println(org.apache.spark.sql.execution.debug.codegenString(executedPlan))
+      // scalastyle:on println
+    }
+
+    def codegenTyped[T: Encoder](): Unit = {
+      // scalastyle:off println
+      println(org.apache.spark.sql.execution.debug.codegenStringTyped[T](executedPlan))
       // scalastyle:on println
     }
 

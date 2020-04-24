@@ -29,7 +29,7 @@ import org.apache.spark.{broadcast, SparkEnv}
 import org.apache.spark.internal.Logging
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.rdd.{RDD, RDDOperationScope}
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Encoder, Row, SparkSession}
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{Predicate => GenPredicate, _}
@@ -131,6 +131,13 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
     doExecute()
   }
 
+  final def executeTyped[T](encoder: Encoder[T]): RDD[T] = executeQuery {
+    if (isCanonicalizedPlan) {
+      throw new IllegalStateException("A canonicalized plan is not supposed to be executed.")
+    }
+    doExecuteTyped[T](encoder)
+  }
+
   /**
    * Returns the result of this query as a broadcast variable by delegating to `doExecuteBroadcast`
    * after preparations.
@@ -225,6 +232,10 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
    * Overridden by concrete implementations of SparkPlan.
    */
   protected def doExecute(): RDD[InternalRow]
+
+  protected def doExecuteTyped[T](encoder: Encoder[T]): RDD[T] = {
+    throw new UnsupportedOperationException(s"$nodeName does not implement doExecuteTyped")
+  }
 
   /**
    * Produces the result of the query as a broadcast variable.

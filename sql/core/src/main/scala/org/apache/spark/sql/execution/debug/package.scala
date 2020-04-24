@@ -25,6 +25,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.encoders._
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodeFormatter, CodegenContext, ExprCode}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
@@ -81,6 +82,18 @@ package object debug {
     output
   }
 
+  def codegenStringTyped[T: Encoder](plan: SparkPlan): String = {
+    val codegenSeq = codegenStringSeqTyped[T](plan)
+    var output = s"Found ${codegenSeq.size} WholeStageCodegen subtrees.\n"
+    for (((subtree, code), i) <- codegenSeq.zipWithIndex) {
+      output += s"== Subtree ${i + 1} / ${codegenSeq.size} ==\n"
+      output += subtree
+      output += "\nGenerated code:\n"
+      output += s"${code}\n"
+    }
+    output
+  }
+
   /**
    * Get WholeStageCodegenExec subtrees and the codegen in a query plan
    *
@@ -97,6 +110,20 @@ package object debug {
     }
     codegenSubtrees.toSeq.map { subtree =>
       val (_, source) = subtree.doCodeGen()
+      (subtree.toString, CodeFormatter.format(source))
+    }
+  }
+
+  def codegenStringSeqTyped[T: Encoder](plan: SparkPlan): Seq[(String, String)] = {
+    val codegenSubtrees = new collection.mutable.HashSet[WholeStageCodegenExec]()
+    plan transform {
+      case s: WholeStageCodegenExec =>
+        codegenSubtrees += s
+        s
+      case s => s
+    }
+    codegenSubtrees.toSeq.map { subtree =>
+      val (_, source) = subtree.doCodeGenTyped[T](implicitly[Encoder[T]])
       (subtree.toString, CodeFormatter.format(source))
     }
   }

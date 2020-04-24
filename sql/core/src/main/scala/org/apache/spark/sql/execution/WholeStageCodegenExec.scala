@@ -25,6 +25,7 @@ import scala.util.control.NonFatal
 
 import org.apache.spark.broadcast
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen._
@@ -577,6 +578,63 @@ case class WholeStageCodegenExec(child: SparkPlan)(val codegenStageId: Int)
     (ctx, cleanedSource)
   }
 
+  def doCodeGenTyped[T](encoder: Encoder[T]): (CodegenContext, CodeAndComment) = {
+    val ctx = new CodegenContext
+    ctx.encoder = encoder
+    val code = child.asInstanceOf[CodegenSupport].produce(ctx, this)
+
+    // main next function.
+    ctx.addNewFunction("processNext",
+      s"""
+        protected void processNext() throws java.io.IOException {
+          ${code.trim}
+        }
+       """, inlineToOuterClass = true)
+
+    val className = generatedClassName()
+
+    val source = s"""
+      public Object generate(Object[] references) {
+        return new $className(references);
+      }
+
+      ${ctx.registerComment(
+        s"""Codegend pipeline for stage (id=$codegenStageId)
+           |${this.treeString.trim}""".stripMargin,
+         "wsc_codegenPipeline")}
+      ${ctx.registerComment(s"codegenStageId=$codegenStageId", "wsc_codegenStageId", true)}
+      final class $className
+      extends Iterator<Long>{
+
+        private Object[] references;
+        private scala.collection.Iterator[] inputs;
+        ${ctx.declareMutableStates()}
+
+        public $className(Object[] references) {
+          this.references = references;
+        }
+
+        public void init(int index, scala.collection.Iterator[] inputs) {
+          partitionIndex = index;
+          this.inputs = inputs;
+          ${ctx.initMutableStates()}
+          ${ctx.initPartition()}
+        }
+
+        ${ctx.emitExtraCode()}
+
+        ${ctx.declareAddedFunctions()}
+      }
+      """.trim
+
+    // try to compile, helpful for debug
+    val cleanedSource = CodeFormatter.stripOverlappingComments(
+      new CodeAndComment(CodeFormatter.stripExtraNewLines(source), ctx.getPlaceHolderToComments()))
+
+    logDebug(s"\n${CodeFormatter.format(cleanedSource)}")
+    (ctx, cleanedSource)
+  }
+
   override def doExecute(): RDD[InternalRow] = {
     val (ctx, cleanedSource) = doCodeGen()
     // try to compile and fallback if it failed
@@ -645,6 +703,74 @@ case class WholeStageCodegenExec(child: SparkPlan)(val codegenStageId: Int)
     }
   }
 
+  override def doExecuteTyped[T](encoder: Encoder[T]): RDD[T] = {
+    val (ctx, cleanedSource) = doCodeGenTyped[T](encoder)
+    // try to compile and fallback if it failed
+    val (_, maxCodeSize) = try {
+      CodeGenerator.compile(cleanedSource)
+    } catch {
+      case NonFatal(_) if !Utils.isTesting && sqlContext.conf.codegenFallback =>
+        // We should already saw the error message
+        logWarning(s"Whole-stage codegen disabled for plan (id=$codegenStageId):\n $treeString")
+        return child.executeTyped[T](encoder)
+    }
+
+    // Check if compiled code has a too large function
+    if (maxCodeSize > sqlContext.conf.hugeMethodLimit) {
+      logInfo(s"Found too long generated codes and JIT optimization might not work: " +
+        s"the bytecode size ($maxCodeSize) is above the limit " +
+        s"${sqlContext.conf.hugeMethodLimit}, and the whole-stage codegen was disabled " +
+        s"for this plan (id=$codegenStageId). To avoid this, you can raise the limit " +
+        s"`${SQLConf.WHOLESTAGE_HUGE_METHOD_LIMIT.key}`:\n$treeString")
+      child match {
+        // The fallback solution of batch file source scan still uses WholeStageCodegenExec
+        case f: FileSourceScanExec if f.supportsBatch => // do nothing
+        case _ => return child.executeTyped(encoder)
+      }
+    }
+
+    val references = ctx.references.toArray
+
+    val durationMs = longMetric("pipelineTime")
+
+    val rdds = child.asInstanceOf[CodegenSupport].inputRDDs()
+    assert(rdds.size <= 2, "Up to two input RDDs can be supported")
+    if (rdds.length == 1) {
+      rdds.head.mapPartitionsWithIndex { (index, iter) =>
+        val (clazz, _) = CodeGenerator.compile(cleanedSource)
+        val buffer = clazz.generate(references).asInstanceOf[BufferedIterator[T]]
+        buffer.init(index, Array(iter))
+        new Iterator[T] {
+          override def hasNext: Boolean = {
+            val v = buffer.hasNext
+            if (!v) durationMs += buffer.durationMs()
+            v
+          }
+          override def next: T = buffer.next()
+        }
+      }(encoder.clsTag)
+    } else {
+      // Right now, we support up to two input RDDs.
+      rdds.head.zipPartitions(rdds(1)) { (leftIter, rightIter) =>
+        Iterator((leftIter, rightIter))
+        // a small hack to obtain the correct partition index
+      }.mapPartitionsWithIndex { (index, zippedIter) =>
+        val (leftIter, rightIter) = zippedIter.next()
+        val (clazz, _) = CodeGenerator.compile(cleanedSource)
+        val buffer = clazz.generate(references).asInstanceOf[BufferedIterator[T]]
+        buffer.init(index, Array(leftIter, rightIter))
+        new Iterator[T] {
+          override def hasNext: Boolean = {
+            val v = buffer.hasNext
+            if (!v) durationMs += buffer.durationMs()
+            v
+          }
+          override def next: T = buffer.next()
+        }
+      }(encoder.clsTag)
+    }
+  }
+
   override def inputRDDs(): Seq[RDD[InternalRow]] = {
     throw new UnsupportedOperationException
   }
@@ -659,10 +785,16 @@ case class WholeStageCodegenExec(child: SparkPlan)(val codegenStageId: Int)
     } else {
       ""
     }
-    s"""
-      |${row.code}
-      |append(${row.value}$doCopy);
-     """.stripMargin.trim
+    if (ctx.encoder == null) {
+      s"""
+        |${row.code}
+        |append(${row.value}$doCopy);
+       """.stripMargin.trim
+    } else {
+      s"""
+        |append(${input(0).value});
+       """.stripMargin.trim
+    }
   }
 
   override def generateTreeString(
